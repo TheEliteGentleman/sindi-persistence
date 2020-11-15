@@ -5,7 +5,9 @@ package za.co.sindi.persistence.dao;
 
 import java.io.Serializable;
 import java.lang.reflect.ParameterizedType;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
 import javax.persistence.EntityManager;
@@ -16,8 +18,13 @@ import javax.persistence.Query;
 import javax.persistence.TypedQuery;
 import javax.persistence.criteria.CriteriaBuilder;
 import javax.persistence.criteria.CriteriaQuery;
+import javax.persistence.criteria.Expression;
+import javax.persistence.criteria.Join;
+import javax.persistence.criteria.Order;
+import javax.persistence.criteria.Root;
 
 import za.co.sindi.persistence.SortOrder;
+import za.co.sindi.persistence.domain.jpa.JPASpecification;
 import za.co.sindi.persistence.entity.Entity;
 import za.co.sindi.persistence.exception.DAOException;
 import za.co.sindi.persistence.pagination.Pagination;
@@ -27,7 +34,7 @@ import za.co.sindi.persistence.pagination.Pagination;
  * @since 07 July 2010
  *
  */
-public abstract class JPAGenericDAO<T extends Entity<PK>, PK extends Serializable> extends AbstractGenericDAO<T, PK> {
+public abstract class JPAGenericDAO<T extends Entity<PK>, PK extends Serializable> extends AbstractGenericDAO<T, PK> implements SpecificationDAO<T, JPASpecification<T>> {
 
 	private static final String NULL_ENTITYMANAGER = "No EntityManager provided.";
 	
@@ -304,6 +311,82 @@ public abstract class JPAGenericDAO<T extends Entity<PK>, PK extends Serializabl
 		query.setMaxResults(paging.getRange());
 		return query.getResultList();
 	}
+	
+	/* (non-Javadoc)
+	 * @see za.co.sindi.persistence.dao.SpecificationDAO#count(za.co.sindi.persistence.domain.Specification)
+	 */
+	@Override
+	public long count(JPASpecification<T> specification) {
+		// TODO Auto-generated method stub
+		final EntityManager entityManager = getEntityManager();
+		
+		if (entityManager == null) {
+			throw new DAOException(NULL_ENTITYMANAGER);
+		}
+		
+		CriteriaBuilder builder = getEntityManager().getCriteriaBuilder();
+		CriteriaQuery<Long> query = builder.createQuery(Long.class); //builder.createQuery(persistentClass);
+		Root<T> root = query.from(persistentClass);
+		query.where(specification.toPredicate(root, builder));
+		
+		return entityManager.createQuery(query.select(builder.count(root))).getSingleResult();	
+	}
+
+	/* (non-Javadoc)
+	 * @see za.co.sindi.persistence.dao.SpecificationDAO#find(za.co.sindi.persistence.domain.Specification)
+	 */
+	@Override
+	public T find(JPASpecification<T> specification) {
+		// TODO Auto-generated method stub
+		return createQueryBySpecification(specification, (SortOrder[])null).getSingleResult();
+	}
+
+	/* (non-Javadoc)
+	 * @see za.co.sindi.persistence.dao.SpecificationDAO#findAll(za.co.sindi.persistence.domain.Specification)
+	 */
+	@Override
+	public Collection<T> findAll(JPASpecification<T> specification) throws DAOException {
+		// TODO Auto-generated method stub
+		return createQueryBySpecification(specification, (SortOrder[])null).getResultList();
+	}
+
+	/* (non-Javadoc)
+	 * @see za.co.sindi.persistence.dao.GenericDAO#findAll(za.co.sindi.persistence.domain.Specification, za.co.sindi.persistence.SortOrder[])
+	 */
+	@Override
+	public Collection<T> findAll(JPASpecification<T> specification, SortOrder... sortOrders) throws DAOException {
+		// TODO Auto-generated method stub
+		return createQueryBySpecification(specification, sortOrders).getResultList();
+	}
+
+	/* (non-Javadoc)
+	 * @see za.co.sindi.persistence.dao.GenericDAO#findAll(za.co.sindi.persistence.domain.Specification, za.co.sindi.persistence.pagination.Pagination)
+	 */
+	@Override
+	public Collection<T> findAll(JPASpecification<T> specification, Pagination paging) throws DAOException {
+		// TODO Auto-generated method stub
+
+		TypedQuery<T> query = createQueryBySpecification(specification, (SortOrder[])null);
+		if (paging != null) {
+			query.setFirstResult(paging.getStartPosition()).setMaxResults(paging.getRange());
+		}
+		
+		return query.getResultList();
+	}
+
+	/* (non-Javadoc)
+	 * @see za.co.sindi.persistence.dao.GenericDAO#findAll(za.co.sindi.persistence.domain.Specification, za.co.sindi.persistence.pagination.Pagination, za.co.sindi.persistence.SortOrder[])
+	 */
+	@Override
+	public Collection<T> findAll(JPASpecification<T> specification, Pagination paging, SortOrder... sortOrders) throws DAOException {
+		// TODO Auto-generated method stub
+		TypedQuery<T> query = createQueryBySpecification(specification, sortOrders);
+		if (paging != null) {
+			query.setFirstResult(paging.getStartPosition()).setMaxResults(paging.getRange());
+		}
+		
+		return query.getResultList();
+	}
 
 	public T findByReference(PK id) throws DAOException {
 		// TODO Auto-generated method stub
@@ -344,7 +427,7 @@ public abstract class JPAGenericDAO<T extends Entity<PK>, PK extends Serializabl
 //	}
 
 	/* (non-Javadoc)
-	 * @see com.neurologic.music4point0.dao.GenericDAO#insert(com.neurologic.music4point0.entity.base.Entity)
+	 * @see za.co.sindi.persistence.dao.GenericDAO#insert(za.co.sindi.persistence.dao.GenericDAO.entity.Entity)
 	 */
 	public boolean save(T entity) throws DAOException {
 		// TODO Auto-generated method stub
@@ -485,21 +568,77 @@ public abstract class JPAGenericDAO<T extends Entity<PK>, PK extends Serializabl
 		
 		return updated;
 	}
-
-	protected Collection<T> search(CriteriaQuery<T> criterion) throws DAOException {
-		if (criterion == null) {
-			throw new IllegalArgumentException("Null criterion provided.");
+	
+	private List<Order> toJPAOrders(SortOrder[] sortOrders, Root<?> root, CriteriaBuilder criteriaBuilder) {
+		
+		List<Order> orders;
+		if (sortOrders == null) {
+			orders = Collections.emptyList();
+		} else {
+			orders = new ArrayList<>();
 		}
 		
+		for (SortOrder sortOrder : sortOrders) {
+			orders.add(toJPAOrder(sortOrder, root, criteriaBuilder));
+		}
+		
+		return Collections.unmodifiableList(orders);
+	}
+	
+	private TypedQuery<T> createQueryBySpecification(final JPASpecification<T> specification, final SortOrder... sortOrders) {
 		final EntityManager entityManager = getEntityManager();
 		
 		if (entityManager == null) {
 			throw new DAOException(NULL_ENTITYMANAGER);
 		}
 		
-		TypedQuery<T> query = entityManager.createQuery(criterion);
-		return query.getResultList();
+		CriteriaBuilder builder = getEntityManager().getCriteriaBuilder();
+		CriteriaQuery<T> query = builder.createQuery(persistentClass);
+		Root<T> root = query.from(persistentClass);
+		query.where(specification.toPredicate(root, builder));
+		
+		if (sortOrders != null && sortOrders.length > 0) {
+			query.orderBy(toJPAOrders(sortOrders, root, builder));
+		}
+		
+		return entityManager.createQuery(query);
 	}
+	
+	private Order toJPAOrder(SortOrder sortOrder, Root<?> root, CriteriaBuilder criteriaBuilder) {
+		
+		Expression<?> expression = null;
+		String pathString = sortOrder.getPropertyName();
+		String[] pathElements = pathString.split("\\.");
+		int pathSize = pathElements.length;
+		
+		if (pathSize > 1) {
+		    Join<Object, Object> path = root.join(pathElements[0]);
+		    for (int i = 1; i < pathSize - 1; i++) {
+		        path = path.join(pathElements[i]);
+		    }
+		
+		    expression = path.get(pathElements[pathSize - 1]);
+		} else {
+		    expression = root.get(pathString);
+		}
+		
+		return sortOrder.isAscending() ? criteriaBuilder.asc(expression) : criteriaBuilder.desc(expression);
+	}
+
+//	protected Collection<T> search(CriteriaQuery<T> criterion) throws DAOException {
+//		if (criterion == null) {
+//			throw new IllegalArgumentException("Null criterion provided.");
+//		}
+//		
+//		final EntityManager entityManager = getEntityManager();
+//		
+//		if (entityManager == null) {
+//			throw new DAOException(NULL_ENTITYMANAGER);
+//		}
+//		
+//		TypedQuery<T> query = entityManager.createQuery(criterion);
+//		return query.getResultList();
+//	}
 	
 	protected abstract EntityManager getEntityManager();
 }
