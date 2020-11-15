@@ -7,7 +7,6 @@ import java.io.Serializable;
 
 import za.co.sindi.common.utils.Classes;
 import za.co.sindi.common.utils.Defaults;
-import za.co.sindi.persistence.entity.Entity;
 
 /**
  * @author Bienfait Sindi
